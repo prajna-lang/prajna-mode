@@ -13,27 +13,36 @@
 
 ;;; Code:
 
-(defvar prajna-keywords
+(defgroup prajna nil
+  "Major mode for editing Prajna code."
+  :prefix "prajna-"
+  :group 'languages)
+
+(defcustom prajna-indent-offset 4
+  "Indentation offset for Prajna code."
+  :type 'integer
+  :group 'prajna)
+
+;; Keywords
+(defconst prajna-keywords
   '("module" "struct" "implement" "interface" "template"
     "var" "use" "as" "if" "else" "while" "for" "in" "to"
-    "continue" "break" "return"))
+    "continue" "break" "return" "func")
+  "Keywords in Prajna language.")
 
-(defvar prajna-keywords-regexp
-  (regexp-opt prajna-keywords 'words))
+;; Operators
+(defconst prajna-operators
+  '("=" "+" "-" "*" "/" "%" "&" "|" "!" "^")
+  "Operators in Prajna language.")
 
-(defvar prajna-unit-keywords
-  '("func" "struct" "implement" "template"))
-
-(defvar prajna-unit-keywords-regexp
-  (concat "\\b\\(" (regexp-opt prajna-unit-keywords) "\\)\\s-+\\(\\w+\\)"))
-
-(defvar prajna-font-lock-keywords
+;; Font lock keywords
+(defconst prajna-font-lock-keywords
   `(
     ;; Keywords
-    (,prajna-keywords-regexp . font-lock-keyword-face)
+    (,(regexp-opt prajna-keywords 'words) . font-lock-keyword-face)
 
-    ;; Function/Struct/Implement/Template definitions
-    (,prajna-unit-keywords-regexp
+    ;; Function/struct/template definitions
+    ("\\b\\(func\\|struct\\|implement\\|template\\)\\s-+\\(\\w+\\)\\b"
      (1 font-lock-keyword-face)
      (2 font-lock-function-name-face))
 
@@ -41,43 +50,159 @@
     ("\\b\\([0-9]+\\)\\b" . font-lock-constant-face)
 
     ;; Strings
-    ("\"\\([^\"\\]\\|\\\\.\\)*\"" . font-lock-string-face)
+    ("\"\\(?:[^\"\\\\]\\|\\\\.\\)*\"" . font-lock-string-face)
+
+    ;; Single quoted strings
+    ("'\\(?:[^'\\\\]\\|\\\\.\\)*'" . font-lock-string-face)
 
     ;; Operators
-    ("[=+\\-*/%&|!^]" . font-lock-builtin-face)
+    (,(regexp-opt prajna-operators) . font-lock-builtin-face)
 
-    ;; Comments - single line
+    ;; Line comments
     ("//.*$" . font-lock-comment-face)
 
-    ;; Comments - block
-    ("/\\*\\(.\\|\n\\)*?\\*/" . font-lock-comment-face)
-    ))
+    ;; Block comments
+    ("/\\*\\(?:[^*]\\|\\*[^/]\\)*\\*/" . font-lock-comment-face)
+    )
+  "Font lock keywords for Prajna mode.")
 
+;; Syntax table
 (defvar prajna-mode-syntax-table
-  (let ((st (make-syntax-table)))
-    ;; C++ style comments "// ..."
-    (modify-syntax-entry ?/ ". 124b" st)
-    (modify-syntax-entry ?* ". 23" st)
-    (modify-syntax-entry ?\n ">" st)
-    ;; String
-    (modify-syntax-entry ?\" "\"" st)
-    ;; Brackets
-    (modify-syntax-entry ?{ "(}" st)
-    (modify-syntax-entry ?} "){" st)
-    (modify-syntax-entry ?[ "(]" st)
-    (modify-syntax-entry ?] ")[" st)
-    (modify-syntax-entry ?\( "()" st)
-    (modify-syntax-entry ?\) ")(" st)
-    st))
+  (let ((table (make-syntax-table)))
+    ;; Comments
+    (modify-syntax-entry ?/ ". 124b" table)
+    (modify-syntax-entry ?* ". 23" table)
+    (modify-syntax-entry ?\n "> b" table)
 
+    ;; Strings
+    (modify-syntax-entry ?\" "\"" table)
+    (modify-syntax-entry ?\' "\"" table)
+
+    ;; Brackets
+    (modify-syntax-entry ?\{ "(}" table)
+    (modify-syntax-entry ?\} "){" table)
+    (modify-syntax-entry ?\[ "(]" table)
+    (modify-syntax-entry ?\] ")[" table)
+    (modify-syntax-entry ?\( "()" table)
+    (modify-syntax-entry ?\) ")(" table)
+
+    ;; Operators
+    (modify-syntax-entry ?+ "." table)
+    (modify-syntax-entry ?- "." table)
+    (modify-syntax-entry ?* "." table)
+    (modify-syntax-entry ?% "." table)
+    (modify-syntax-entry ?& "." table)
+    (modify-syntax-entry ?| "." table)
+    (modify-syntax-entry ?! "." table)
+    (modify-syntax-entry ?^ "." table)
+    (modify-syntax-entry ?= "." table)
+
+    table)
+  "Syntax table for Prajna mode.")
+
+;; Indentation
+(defun prajna-indent-line ()
+  "Indent current line as Prajna code."
+  (interactive)
+  (let ((indent-col 0)
+        (cur-indent (current-indentation)))
+    (save-excursion
+      (beginning-of-line)
+      (if (bobp)
+          (setq indent-col 0)
+        (let ((not-indented t))
+          (while not-indented
+            (forward-line -1)
+            (if (looking-at "^[ \t]*$")
+                nil
+              (if (looking-at "^.*{[ \t]*$")
+                  (progn
+                    (setq indent-col (+ (current-indentation) prajna-indent-offset))
+                    (setq not-indented nil))
+                (if (looking-at "^[ \t]*}")
+                    (progn
+                      (setq indent-col (current-indentation))
+                      (setq not-indented nil))
+                  (progn
+                    (setq indent-col (current-indentation))
+                    (setq not-indented nil)))))))))
+
+    (save-excursion
+      (beginning-of-line)
+      (if (looking-at "^[ \t]*}")
+          (setq indent-col (- indent-col prajna-indent-offset))))
+
+    (if (< indent-col 0)
+        (setq indent-col 0))
+
+    (if (/= cur-indent indent-col)
+        (progn
+          (beginning-of-line)
+          (delete-horizontal-space)
+          (indent-to indent-col)))))
+
+;; Keymap
+(defvar prajna-mode-map
+  (let ((map (make-keymap)))
+    (define-key map (kbd "TAB") 'prajna-indent-line)
+    (define-key map (kbd "C-c C-c") 'comment-region)
+    (define-key map (kbd "C-c C-u") 'uncomment-region)
+    map)
+  "Keymap for Prajna mode.")
+
+;; Auto-pairing
+(defun prajna-electric-pair ()
+  "Electric pairing for Prajna mode."
+  (when (and (boundp 'electric-pair-mode) electric-pair-mode)
+    (setq-local electric-pair-pairs
+                '((?{ . ?})
+                  (?\[ . ?\])
+                  (?\( . ?\))
+                  (?\" . ?\")
+                  (?\' . ?\')))))
+
+;; Comment functions
+(defun prajna-comment-dwim (arg)
+  "Comment or uncomment current line or region.
+ARG is passed to `comment-dwim'."
+  (interactive "*P")
+  (require 'newcomment)
+  (let ((comment-start "// ")
+        (comment-end ""))
+    (comment-dwim arg)))
+
+;; Define the major mode
 ;;;###autoload
 (define-derived-mode prajna-mode prog-mode "Prajna"
-  "Major mode for editing Prajna language files."
+  "Major mode for editing Prajna programming language files."
   :syntax-table prajna-mode-syntax-table
-  (setq font-lock-defaults '((prajna-font-lock-keywords)))
-  (setq comment-start "// ")
-  (setq comment-end ""))
 
+  ;; Font lock
+  (setq-local font-lock-defaults '(prajna-font-lock-keywords))
+
+  ;; Comments
+  (setq-local comment-start "// ")
+  (setq-local comment-end "")
+  (setq-local comment-start-skip "//+\\s-*")
+
+  ;; Indentation
+  (setq-local indent-line-function 'prajna-indent-line)
+  (setq-local tab-width prajna-indent-offset)
+
+  ;; Electric pairing
+  (prajna-electric-pair)
+
+  ;; Imenu support
+  (setq-local imenu-generic-expression
+              '(("Functions" "^\\s-*func\\s-+\\(\\w+\\)" 1)
+                ("Structs" "^\\s-*struct\\s-+\\(\\w+\\)" 1)
+                ("Templates" "^\\s-*template\\s-+\\(\\w+\\)" 1)
+                ("Modules" "^\\s-*module\\s-+\\(\\w+\\)" 1)))
+
+  ;; Set up syntax highlighting
+  (font-lock-mode 1))
+
+;; Auto-mode-alist
 ;;;###autoload
 (add-to-list 'auto-mode-alist '("\\.prajna\\'" . prajna-mode))
 
